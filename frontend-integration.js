@@ -24,8 +24,8 @@
  */
 
 const CONFIG = {
-  SUPABASE_URL: "https://xxxxxxxxxxxx.supabase.co",       // <-- ganti
-  SUPABASE_ANON_KEY: "isi-dengan-anon-public-key-anda",     // <-- ganti
+  SUPABASE_URL: "https:// lxemgrajsqxuucbcpibp.supabase.co",       // <-- ganti
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4ZW1ncmFqc3F4dXVjYmNwaWJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MDU0ODIsImV4cCI6MjEwNjA4MTQ4Mn0.2aeLx4UmAW1q1liGwmu_Sl0BoqXywXuGbrdvoih829g",     // <-- ganti
   API_BASE: ""  // kosongkan jika index.html & folder /api berada di domain Vercel yang sama
 };
 
