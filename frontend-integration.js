@@ -26,7 +26,7 @@
 const CONFIG = {
   SUPABASE_URL: "https:// lxemgrajsqxuucbcpibp.supabase.co",       // <-- ganti
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4ZW1ncmFqc3F4dXVjYmNwaWJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1MDU0ODIsImV4cCI6MjEwNjA4MTQ4Mn0.2aeLx4UmAW1q1liGwmu_Sl0BoqXywXuGbrdvoih829g",     // <-- ganti
-  API_BASE: ""  // kosongkan jika index.html & folder /api berada di domain Vercel yang sama
+  API_BASE: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4ZW1ncmFqc3F4dXVjYmNwaWJwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDUwNTQ4MiwiZXhwIjoyMTA2MDgxNDgyfQ.sgmc0l_XhybKHKU5IV8BhWHe9I0LtiZNTu7-qdHbYxA"  // kosongkan jika index.html & folder /api berada di domain Vercel yang sama
 };
 
 const supabaseAuth = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
