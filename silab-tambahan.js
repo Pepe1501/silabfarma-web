@@ -6,7 +6,7 @@
 
   // ================= 1. BUKTI PDF DIKIRIM LEWAT EMAIL (bukan unduh otomatis) =================
   const JENIS = { submitRequestMulti: 'Permintaan Bahan', submitPeminjamanMulti: 'Peminjaman Alat', submitGantiAlatMulti: 'Laporan Alat Rusak' };
-  let emailTujuan = null;
+  let emailTujuan = null, alasan = '';
 
   async function kirimEmail(name, args, r) {
     const p = args[0] || {};
@@ -15,11 +15,17 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: p.email, nama: p.pemohon || p.peminjam || p.nama, jenis: JENIS[name], pdfBase64: r.pdfBase64, pdfName: r.pdfName })
       });
-      if (!res.ok) throw new Error('gagal');
+      if (!res.ok) {
+        let d = {};
+        try { d = await res.json(); } catch (_) {}
+        throw new Error(d.error || ('HTTP ' + res.status));
+      }
       emailTujuan = p.email;
       return { status: 'Sukses' };               // tanpa pdfBase64 => PDF tidak diunduh otomatis
     } catch (e) {
       emailTujuan = null;
+      alasan = e.message;
+      console.error('Kirim email gagal:', e);
       return r;                                  // cadangan: bila email gagal, PDF tetap diunduh
     }
   }
@@ -48,7 +54,7 @@
     if (o && typeof o === 'object') {
       const info = emailTujuan
         ? `Bukti PDF sudah dikirim ke ${esc(emailTujuan)}. Jika belum masuk, cek folder Spam.`
-        : 'Email gagal terkirim, jadi PDF diunduh sebagai cadangan. Mohon simpan filenya.';
+        : `Email gagal terkirim (alasan: ${esc(alasan)}), jadi PDF diunduh sebagai cadangan. Mohon simpan filenya.`;
       if (/otomatis diunduh/.test(o.text || '')) o.text = info;
       if (/Batas waktu penggantian/.test(o.html || '')) o.html += `<br><small>${info}</small>`;
     }
