@@ -1,0 +1,7 @@
+{
+  "name": "silabfarma-web",
+  "private": true,
+  "dependencies": {
+    "nodemailer": "^6.9.14"
+  }
+}
