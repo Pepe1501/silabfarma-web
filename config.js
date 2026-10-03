@@ -1,2 +1,2 @@
-const SUPABASE_URL = "https://qjteqmxmuprfpzhrkraa.supabase.co";
-const SUPABASE_KEY = "GANTI_DENGAN_KUNCI_ANDA";
+const SUPABASE_URL = "https://dxatvfioicumtjfrggcd.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR4YXR2ZmlvaWN1bXRqZnJnZ2NkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA5OTYyMjksImV4cCI6MjEwNjU3MjIyOX0.ZtcReIxFI5EQ75LoAvfyX-R1GtwSXQ7icP4r5SnRfo0";
