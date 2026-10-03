@@ -1,9 +1,0 @@
-{
-  "name": "silabfarma-web",
-  "version": "1.0.0",
-  "private": true,
-  "description": "SiLAB Farma - Sistem Informasi Laboratorium Farmasi (Supabase + Vercel)",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.45.0"
-  }
-}
