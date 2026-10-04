@@ -60,18 +60,9 @@
     };
   }
   const GREEN = [15, 118, 110], AMBER = [180, 83, 9];
-  const pdfReq = (x, items) => buildPdf({
-    judul: 'Pengajuan Bahan Praktikum', accent: GREEN, prefix: 'Tanda_Terima', sigLabel: 'Pemohon',
-    nama: x.pemohon, nim: x.nim, signature: x.signature, itemsTitle: 'Daftar Bahan Yang Diajukan:', itemsHead: 'Nama Bahan', items,
-    rows: [['NAMA PEMOHON', x.pemohon], ['NIM', x.nim], ['KELAS / PRODI', x.kelas], ['TANGGAL PRAKTIKUM', indo(x.tanggal)],
-           ['DOSEN PJ', x.dosen], ['TUJUAN / MODUL', x.tujuan]]
-  });
-  const pdfLoan = (x, items) => buildPdf({
-    judul: 'Peminjaman Alat Praktikum', accent: GREEN, prefix: 'Peminjaman_Alat', sigLabel: 'Peminjam',
-    nama: x.peminjam, nim: x.nim, signature: x.signature, itemsTitle: 'Daftar Alat Yang Dipinjam:', itemsHead: 'Nama Alat', items,
-    rows: [['NAMA PEMINJAM', x.peminjam], ['NIM', x.nim], ['KELAS / PRODI', x.kelas], ['TANGGAL PINJAM', indo(x.tanggalPinjam)],
-           ['TANGGAL KEMBALI', indo(x.tanggalKembali)], ['DOSEN PJ', x.dosen], ['TUJUAN / MODUL', x.tujuan]]
-  });
+  // Format PDF mengikuti form Word Prodi DIII Farmasi (dibuat di silab-tambahan.js)
+  const pdfReq = (x, items) => window.SILAB_PDF.bahan(x, items);
+  const pdfLoan = (x, items) => window.SILAB_PDF.alat(x, items);
 
   // ---------- Fungsi server (setara Code.gs) ----------
   const API = {
@@ -122,14 +113,7 @@
     async submitGantiAlatMulti(p) {
       if (!p || !p.items || !p.items.length) throw new Error('Belum ada alat yang dipilih.');
       ok(await sb.rpc('submit_ganti_alat', { p }));
-      return buildPdf({
-        judul: 'Laporan & Penggantian Alat Rusak', accent: AMBER, prefix: 'Laporan_Ganti_Alat', sigLabel: 'Pelapor',
-        nama: p.nama, nim: p.nim, signature: p.signature, itemsTitle: 'Daftar Alat Yang Rusak / Harus Diganti:', itemsHead: 'Nama Alat',
-        items: p.items.map(i => ({ nama: i.namaAlat, jumlah: i.jumlah, satuan: i.satuan })),
-        note: 'Batas Waktu Penggantian: ' + p.batasWaktu + ' (maks. 7 hari sejak laporan)',
-        rows: [['NAMA PELAPOR', p.nama], ['NIM', p.nim], ['KELAS / PRODI', p.kelas], ['NO. TELP/WA', p.telp],
-               ['TANGGAL LAPOR', p.tanggalLapor], ['MERK ALAT', p.merk || '-'], ['KETERANGAN', p.keterangan]]
-      });
+      return window.SILAB_PDF.ganti(p);
     },
 
     async generatePdfOnTheFly(t, nama) {
@@ -137,7 +121,7 @@
       if (!rows.length) throw new Error('Data pengajuan tidak ditemukan.');
       const r = rows[0];
       return pdfReq({ pemohon: r.nama_pemohon, nim: r.nim, kelas: r.kelas, tanggal: r.tanggal_praktikum, dosen: r.nama_dosen,
-                      tujuan: r.tujuan, signature: r.tanda_tangan },
+                      tujuan: r.tujuan, telp: r.telp, signature: r.tanda_tangan },
                     rows.map(x => ({ nama: x.nama_bahan, jumlah: n(x.jumlah), satuan: x.satuan || 'Unit' })));
     },
     async generateLoanPdfOnTheFly(t, nama) {
@@ -145,7 +129,7 @@
       if (!rows.length) throw new Error('Data peminjaman tidak ditemukan.');
       const r = rows[0];
       return pdfLoan({ peminjam: r.nama_peminjam, nim: r.nim, kelas: r.kelas, tanggalPinjam: r.tanggal_pinjam,
-                       tanggalKembali: r.tanggal_kembali, dosen: r.nama_dosen, tujuan: r.tujuan, signature: r.tanda_tangan },
+                       tanggalKembali: r.tanggal_kembali, dosen: r.nama_dosen, tujuan: r.tujuan, telp: r.telp, signature: r.tanda_tangan },
                      rows.map(x => ({ nama: x.nama_alat, jumlah: n(x.jumlah), satuan: x.satuan || 'Unit' })));
     },
 
