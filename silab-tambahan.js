@@ -76,9 +76,10 @@
     }
     tutupKet(y);
 
-    // Tabel validasi (+ blok pengembalian / penggantian)
-    y += 9;
-    if (y + (o.blok ? 7 + 17 : 0) + 6 + 34 + 2 > 280) { d.addPage(); y = 20; }
+    // Tabel validasi (+ blok pengembalian / penggantian): selalu menempel di bagian bawah halaman
+    const tinggiVal = 6 + 17 * 2 + (o.blok ? 7 + 17 : 0);
+    if (y + 9 + tinggiVal + 2 > 280) { d.addPage(); y = 20; }
+    else y = 280 - tinggiVal;
     const vw = [52.9, 56.8, 57.3], vx = [X, X + 52.9, X + 109.7];
     d.rect(X, y, W, 6); L(vx[1], y, vx[1], y + 6); L(vx[2], y, vx[2], y + 6);
     d.setFont('helvetica', 'bold');
@@ -326,4 +327,152 @@
     merkBox.hidden = !cartGanti.length;
     if (!cartGanti.length) $('ganti-merk').value = '';
   };
+})();
+
+/* SiLABFarma - kelola data master: tambah / ubah / hapus bahan dan alat (menggantikan tombol "Atur Bahan" & "Atur Alat"). */
+(function () {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // Sesi login admin tersimpan di browser, jadi koneksi ini otomatis ikut memakai login admin.
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const IZIN = 'Perubahan ditolak oleh database (izin belum diatur). Jalankan SQL izin di Supabase SQL Editor, lalu coba lagi.';
+
+  const CFG = {
+    bahan: { tabel: 'master_bahan', awalan: 'B', label: 'Bahan', data: () => INVENTORY_DATA, tbody: 'stok-table-body', tab: 'tab-stok' },
+    alat:  { tabel: 'master_alat',  awalan: 'A', label: 'Alat',  data: () => ALAT_DATA,      tbody: 'stok-alat-table-body', tab: 'tab-stok-alat' }
+  };
+
+  const idBerikut = (arr, awalan) => {
+    let max = 0;
+    arr.forEach(x => { const m = /(\d+)\s*$/.exec(String(x.id)); if (m) max = Math.max(max, parseInt(m[1], 10)); });
+    return awalan + String(max + 1).padStart(3, '0');
+  };
+
+  const kolom = (id, label, tipe, nilai, o = {}) =>
+    `<div style="text-align:left;margin-bottom:10px"><label style="display:block;font-size:12px;font-weight:700;color:#475569;margin-bottom:3px">${label}</label>` +
+    `<input id="kl-${id}" type="${tipe}" value="${esc(nilai)}" ${o.ro ? 'readonly' : ''} ${o.list ? 'list="' + o.list + '"' : ''} ${o.attr || ''} ` +
+    `style="width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:8px 12px;font-size:14px;${o.ro ? 'background:#f1f5f9;color:#64748b;' : ''}"></div>`;
+  const daftarPilihan = (id, arr) => `<datalist id="${id}">${arr.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+
+  function pesanError(e) {
+    const m = (e && e.message) || String(e);
+    return /row-level security|permission denied/i.test(m) ? IZIN : m;
+  }
+
+  async function simpan(jenis, baru, id, row) {
+    const c = CFG[jenis];
+    const q = baru
+      ? db.from(c.tabel).insert({ id, ...row }).select()
+      : db.from(c.tabel).update(row).eq('id', id).select();
+    const { data, error } = await q;
+    if (error) throw new Error(pesanError(error));
+    if (!data || !data.length) throw new Error(IZIN);
+  }
+
+  async function formulir(jenis, item) {
+    const c = CFG[jenis], baru = !item;
+    const uniq = k => [...new Set(c.data().map(x => x[k]).filter(v => v && v !== '-'))];
+    const id = baru ? idBerikut(c.data(), c.awalan) : item.id;
+    const bersih = v => (v && v !== '-' ? v : '');
+
+    let html = kolom('id', 'ID (otomatis)', 'text', id, { ro: true }) +
+      kolom('nama', 'Nama ' + c.label, 'text', baru ? '' : item.nama, { attr: 'placeholder="Contoh: ' + (jenis === 'bahan' ? 'Paracetamol' : 'Tabung Reaksi') + '"' }) +
+      kolom('kategori', 'Kategori', 'text', baru ? '' : bersih(item.kategori), { list: 'kl-dl-kat', attr: 'placeholder="Contoh: ' + (jenis === 'bahan' ? 'Padat/Serbuk' : 'Gelas') + '"' }) +
+      kolom('stok', 'Stok', 'number', baru ? '' : item.stok, { attr: 'min="0" step="any" placeholder="0"' }) +
+      kolom('satuan', 'Satuan', 'text', baru ? '' : bersih(item.satuan), { list: 'kl-dl-sat', attr: 'placeholder="Contoh: ' + (jenis === 'bahan' ? 'Gram, Ml' : 'Buah, Unit') + '"' });
+    if (jenis === 'bahan') {
+      const exp = !baru && /^\d{4}-\d{2}-\d{2}/.test(item.expDate) ? item.expDate.slice(0, 10) : '';
+      html += kolom('exp', 'Tanggal Kadaluarsa (boleh dikosongkan)', 'date', exp);
+    } else {
+      html += kolom('kondisi', 'Kondisi', 'text', baru ? 'Baik' : (bersih(item.kondisi) || 'Baik'), { list: 'kl-dl-kon' });
+    }
+    html += daftarPilihan('kl-dl-kat', uniq('kategori')) + daftarPilihan('kl-dl-sat', uniq('satuan')) +
+      daftarPilihan('kl-dl-kon', [...new Set(['Baik', 'Rusak Ringan', 'Rusak Berat', ...uniq('kondisi')])]);
+
+    const r = await Swal.fire({
+      title: (baru ? 'Tambah ' : 'Ubah ') + c.label, html, showCancelButton: true, focusConfirm: false,
+      confirmButtonColor: '#0f766e', cancelButtonColor: '#94a3b8', confirmButtonText: 'Simpan', cancelButtonText: 'Batal',
+      preConfirm: () => {
+        const g = k => { const e = $('kl-' + k); return e ? e.value.trim() : ''; };
+        if (!g('nama')) return Swal.showValidationMessage('Nama wajib diisi.');
+        const stok = Number(g('stok'));
+        if (g('stok') === '' || isNaN(stok) || stok < 0) return Swal.showValidationMessage('Stok harus berupa angka 0 atau lebih.');
+        if (!g('satuan')) return Swal.showValidationMessage('Satuan wajib diisi.');
+        const row = { nama: g('nama'), kategori: g('kategori') || '-', stok, satuan: g('satuan') };
+        if (jenis === 'bahan') row.exp_date = g('exp') || null;
+        else row.kondisi = g('kondisi') || 'Baik';
+        return row;
+      }
+    });
+    if (!r.isConfirmed || !r.value) return;
+
+    try {
+      Swal.fire({ title: 'Menyimpan...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      await simpan(jenis, baru, id, r.value);
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: c.label + (baru ? ' ditambahkan' : ' diperbarui'), showConfirmButton: false, timer: 1800 });
+      fetchData(false);
+    } catch (e) {
+      Swal.fire('Gagal Menyimpan', pesanError(e), 'error');
+    }
+  }
+
+  async function hapus(jenis, id) {
+    const c = CFG[jenis], item = c.data().find(x => x.id === id);
+    if (!item) return;
+    const r = await Swal.fire({
+      title: 'Hapus ' + c.label.toLowerCase() + ' ini?',
+      html: `<b>${esc(item.nama)}</b> (${esc(item.id)}) akan dihapus permanen dari daftar stok. Tindakan ini tidak bisa dibatalkan.`,
+      icon: 'warning', showCancelButton: true, confirmButtonColor: '#e11d48', cancelButtonColor: '#94a3b8',
+      confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal'
+    });
+    if (!r.isConfirmed) return;
+    try {
+      const { data, error } = await db.from(c.tabel).delete().eq('id', id).select();
+      if (error) throw new Error(pesanError(error));
+      if (!data || !data.length) throw new Error(IZIN);
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: c.label + ' dihapus', showConfirmButton: false, timer: 1800 });
+      fetchData(false);
+    } catch (e) {
+      Swal.fire('Gagal Menghapus', pesanError(e), 'error');
+    }
+  }
+
+  // Tambahkan kolom "Aksi" (Ubah / Hapus) di setiap baris tabel stok
+  function tambahAksi(jenis) {
+    const tb = $(CFG[jenis].tbody); if (!tb) return;
+    const head = tb.closest('table').querySelector('thead tr');
+    if (head && !head.querySelector('[data-aksi]')) head.insertAdjacentHTML('beforeend', '<th class="p-4" data-aksi>Aksi</th>');
+    tb.querySelectorAll('tr').forEach(tr => {
+      if (tr.cells.length !== 6) return;
+      const id = esc(tr.cells[0].textContent.trim());
+      tr.insertAdjacentHTML('beforeend',
+        '<td class="p-4 whitespace-nowrap">' +
+        `<button type="button" data-kl="ubah" data-id="${id}" class="bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 px-3 py-1.5 rounded-lg text-[10px] font-bold transition mr-1"><i class="fa-solid fa-pen mr-1"></i>Ubah</button>` +
+        `<button type="button" data-kl="hapus" data-id="${id}" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-[10px] font-bold transition"><i class="fa-solid fa-trash-can mr-1"></i>Hapus</button></td>`);
+    });
+  }
+
+  ['bahan', 'alat'].forEach(jenis => {
+    const c = CFG[jenis];
+    // klik tombol Ubah / Hapus pada baris tabel
+    $(c.tbody).addEventListener('click', e => {
+      const b = e.target.closest('button[data-kl]'); if (!b) return;
+      const id = b.dataset.id;
+      if (b.dataset.kl === 'hapus') hapus(jenis, id);
+      else { const item = c.data().find(x => x.id === id); if (item) formulir(jenis, item); }
+    });
+    // tombol di atas tabel: "Atur ..." menjadi "Tambah ..."
+    const tombol = document.querySelector(`#${c.tab} button.bg-teal-600`);
+    if (tombol) {
+      tombol.removeAttribute('onclick');
+      tombol.onclick = () => formulir(jenis, null);
+      tombol.innerHTML = `<i class="fa-solid fa-plus mr-1"></i> Tambah ${c.label}`;
+    }
+  });
+
+  // Setelah tabel digambar ulang, pasang kolom Aksi lagi
+  const asliBahan = window.renderTableStok;
+  window.renderTableStok = function () { asliBahan(); tambahAksi('bahan'); };
+  const asliAlat = window.renderTableStokAlat;
+  window.renderTableStokAlat = function () { asliAlat(); tambahAksi('alat'); };
 })();
