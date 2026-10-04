@@ -65,6 +65,15 @@
       d.text(nm, cx[1] + 2, y + 4.9); d.text(jm, cx[2] + 2, y + 4.9);
       y += h;
     });
+
+    // Pastikan tinggi tabel cukup untuk tulisan Keterangan
+    const butuh = ket.length * 4.2 + 4;
+    if (!ketDone && y - segTop < butuh) {
+      const tambah = butuh - (y - segTop);
+      d.rect(X, y, cw[0] + cw[1] + cw[2], tambah);
+      L(cx[1], y, cx[1], y + tambah); L(cx[2], y, cx[2], y + tambah);
+      y += tambah;
+    }
     tutupKet(y);
 
     // Tabel validasi (+ blok pengembalian / penggantian)
