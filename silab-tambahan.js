@@ -99,14 +99,14 @@
   window.SILAB_PDF = {
     bahan: (x, items) => build({
       judul: 'FORM PERMINTAAN BAHAN PRODI DIII FARMASI', prefix: 'Form_Permintaan_Bahan',
-      daftar: 'Daftar Bahan Yang Diajukan', kolomNama: 'Nama Bahan', minRows: 10, items,
+      daftar: 'Daftar Bahan Yang Diajukan', kolomNama: 'Nama Bahan', minRows: 0, items,
       keterangan: x.tujuan, peran: 'Pemohon', nama: x.pemohon, signature: x.signature,
       info: [['Nama Pemohon', x.pemohon], ['NIM', x.nim], ['Tingkat/Semester', x.kelas], ['Tanggal Permintaan Bahan', indo(x.tanggal)],
              ['Dosen Pengampu', x.dosen], ['No. Handphone', x.telp]]
     }),
     alat: (x, items) => build({
       judul: 'FORM PEMINJAMAN ALAT PRODI DIII FARMASI', prefix: 'Form_Peminjaman_Alat',
-      daftar: 'Daftar Alat Yang Dipinjam', kolomNama: 'Nama Alat', minRows: 20, items,
+      daftar: 'Daftar Alat Yang Dipinjam', kolomNama: 'Nama Alat', minRows: 0, items,
       keterangan: x.tujuan, peran: 'Pemohon', nama: x.peminjam, signature: x.signature,
       blok: 'Pengembalian Alat', yang: 'Yang Mengembalikan',
       info: [['Nama Pemohon', x.peminjam], ['NIM', x.nim], ['Tingkat/Semester', x.kelas], ['Tanggal Peminjaman Alat', indo(x.tanggalPinjam)],
@@ -116,7 +116,7 @@
       const ket = [...(x.keterangan ? [x.keterangan] : []), ...(x.merk ? ['Merk: ' + x.merk] : [])];
       return build({
         judul: 'FORM PENGGANTIAN ALAT PRODI DIII FARMASI', prefix: 'Form_Penggantian_Alat',
-        daftar: 'Daftar Alat Yang Rusak / Harus Diganti', kolomNama: 'Nama Alat', minRows: 10,
+        daftar: 'Daftar Alat Yang Rusak / Harus Diganti', kolomNama: 'Nama Alat', minRows: 0,
         items: x.items.map(i => ({ nama: i.namaAlat, jumlah: i.jumlah, satuan: i.satuan })),
         keterangan: ket,
         peran: 'Nama', nama: x.nama, signature: x.signature, blok: 'Penggantian Alat', yang: 'Yang Mengganti',
