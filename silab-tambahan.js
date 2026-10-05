@@ -619,3 +619,156 @@
   const asliAlat = window.renderTableStokAlat;
   window.renderTableStokAlat = function () { asliAlat(); tambahAksi('alat'); };
 })();
+
+/* SiLABFarma - tombol "Unduh Excel" untuk Stok Bahan & Stok Alat (data diambil terbaru dari database saat tombol diklik). */
+(function () {
+  const $ = id => document.getElementById(id);
+  const pad = n => String(n).padStart(2, '0');
+  const BLN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+  const sekarang = () => { const d = new Date(); return `${pad(d.getDate())} ${BLN[d.getMonth()]} ${d.getFullYear()} pukul ${pad(d.getHours())}.${pad(d.getMinutes())}`; };
+  const cap = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const WARNA = {            // [warna latar, warna tulisan]
+    Aman: ['FFD1FAE5', 'FF047857'], Tersedia: ['FFD1FAE5', 'FF047857'],
+    Menipis: ['FFFEF3C7', 'FFB45309'], Kadaluarsa: ['FFFFE4E6', 'FFBE123C'], Habis: ['FFE2E8F0', 'FF334155']
+  };
+
+  // Pustaka Excel dimuat otomatis (sekali) dari cdnjs
+  let libP = null;
+  function muatExcelJS() {
+    if (window.ExcelJS) return Promise.resolve();
+    if (libP) return libP;
+    libP = new Promise((ok, ng) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+      s.onload = ok;
+      s.onerror = () => { libP = null; ng(new Error('Gagal memuat pustaka Excel. Periksa koneksi internet lalu coba lagi.')); };
+      document.head.appendChild(s);
+    });
+    return libP;
+  }
+  setTimeout(() => muatExcelJS().catch(() => {}), 2500);   // siapkan di latar belakang
+
+  //#BEGIN
+  function buatWorkbook(cfg, ExcelJS, waktu) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'SiLABFarma'; wb.created = new Date();
+    const ws = wb.addWorksheet(cfg.sheet, {
+      views: [{ state: 'frozen', ySplit: 4 }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+    });
+    const n = cfg.kolom.length;
+    ws.columns = cfg.kolom.map(k => ({ width: k.width }));
+    const last = ws.getColumn(n).letter;
+    const garis = { style: 'thin', color: { argb: 'FFCBD5E1' } };
+    const kotak = { top: garis, left: garis, bottom: garis, right: garis };
+
+    ws.mergeCells(`A1:${last}1`); ws.mergeCells(`A2:${last}2`); ws.mergeCells(`A3:${last}3`);
+    const t = ws.getCell('A1'); t.value = cfg.judul; t.font = { bold: true, size: 14, color: { argb: 'FF0F766E' } };
+    t.alignment = { vertical: 'middle' }; ws.getRow(1).height = 26;
+    const w = ws.getCell('A2'); w.value = 'Data diperbarui: ' + waktu; w.font = { italic: true, size: 10, color: { argb: 'FF64748B' } };
+    const r3 = ws.getCell('A3'); r3.value = cfg.ringkasan; r3.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
+
+    const hr = ws.getRow(4); hr.height = 24;
+    cfg.kolom.forEach((k, i) => {
+      const c = hr.getCell(i + 1);
+      c.value = k.header;
+      c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      c.border = kotak;
+    });
+
+    if (!cfg.baris.length) {
+      ws.mergeCells(`A5:${last}5`);
+      const c = ws.getCell('A5'); c.value = 'Belum ada data.'; c.alignment = { horizontal: 'center' };
+    }
+    cfg.baris.forEach((b, idx) => {
+      const r = ws.getRow(5 + idx);
+      b.forEach((v, i) => {
+        const k = cfg.kolom[i], c = r.getCell(i + 1);
+        c.value = v; c.border = kotak;
+        c.alignment = { horizontal: k.align || 'left', vertical: 'middle', wrapText: !!k.wrap };
+        if (k.fmt) c.numFmt = k.fmt;
+        if (idx % 2 === 1) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      });
+      const st = WARNA[b[n - 1]];
+      if (st) {
+        const c = r.getCell(n);
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: st[0] } };
+        c.font = { bold: true, color: { argb: st[1] } };
+      }
+    });
+    ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: n } };
+    return wb;
+  }
+  //#END
+
+  const statusBahan = i => isExpired(i.expDate) ? 'Kadaluarsa' : i.stok === 0 ? 'Habis' : i.stok <= STOK_CRITICAL ? 'Menipis' : 'Aman';
+  const tglExp = v => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || '')); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : '-'; };
+
+  const KONFIG = {
+    bahan: () => {
+      const baris = INVENTORY_DATA.map((i, x) => [x + 1, i.id, i.nama, i.kategori, i.stok, i.satuan, tglExp(i.expDate), statusBahan(i)]);
+      const hit = s => baris.filter(b => b[7] === s).length;
+      return {
+        file: `Stok_Bahan_SiLABFarma_${cap()}.xlsx`, sheet: 'Stok Bahan', judul: 'STOK BAHAN PRAKTIKUM - Laboratorium Terpadu Prodi DIII Farmasi',
+        ringkasan: `Total ${baris.length} bahan  |  Aman: ${hit('Aman')}  |  Menipis: ${hit('Menipis')}  |  Kadaluarsa: ${hit('Kadaluarsa')}  |  Habis: ${hit('Habis')}`,
+        kolom: [
+          { header: 'No', width: 6, align: 'center' }, { header: 'ID', width: 10, align: 'center' },
+          { header: 'Nama Bahan', width: 50, wrap: true }, { header: 'Kategori', width: 18 },
+          { header: 'Stok', width: 12, align: 'right', fmt: '#,##0.##' }, { header: 'Satuan', width: 12, align: 'center' },
+          { header: 'Tanggal Kadaluarsa', width: 20, align: 'center', fmt: 'dd/mm/yyyy' }, { header: 'Status', width: 14, align: 'center' }
+        ], baris
+      };
+    },
+    alat: () => {
+      const baris = ALAT_DATA.map((i, x) => [x + 1, i.id, i.nama, i.kategori, i.stok, i.satuan, i.kondisi, i.stok === 0 ? 'Habis' : 'Tersedia']);
+      const unit = ALAT_DATA.reduce((s, i) => s + i.stok, 0);
+      return {
+        file: `Stok_Alat_SiLABFarma_${cap()}.xlsx`, sheet: 'Stok Alat', judul: 'STOK ALAT PRAKTIKUM - Laboratorium Terpadu Prodi DIII Farmasi',
+        ringkasan: `Total ${baris.length} jenis alat  |  Total unit tersedia: ${unit}  |  Alat habis: ${baris.filter(b => b[7] === 'Habis').length}`,
+        kolom: [
+          { header: 'No', width: 6, align: 'center' }, { header: 'ID', width: 10, align: 'center' },
+          { header: 'Nama Alat', width: 50, wrap: true }, { header: 'Kategori', width: 18 },
+          { header: 'Stok Tersedia', width: 15, align: 'right', fmt: '#,##0.##' }, { header: 'Satuan', width: 12, align: 'center' },
+          { header: 'Kondisi', width: 16, align: 'center' }, { header: 'Status', width: 14, align: 'center' }
+        ], baris
+      };
+    }
+  };
+
+  async function unduh(jenis, btn) {
+    const asli = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyiapkan...';
+    try {
+      await Promise.all([window.fetchData(false), muatExcelJS()]);    // ambil data TERBARU dulu
+      const cfg = KONFIG[jenis]();
+      const wb = buatWorkbook(cfg, window.ExcelJS, sekarang());
+      const buf = await wb.xlsx.writeBuffer();
+      const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a'); a.href = url; a.download = cfg.file;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Excel berhasil diunduh', showConfirmButton: false, timer: 2000 });
+    } catch (e) {
+      Swal.fire('Gagal Mengunduh', (e && e.message) || String(e), 'error');
+    } finally {
+      btn.disabled = false; btn.innerHTML = asli;
+    }
+  }
+
+  [['bahan', 'tab-stok'], ['alat', 'tab-stok-alat']].forEach(([jenis, tab]) => {
+    const tombol = document.querySelector(`#${tab} button.bg-teal-600`);
+    if (!tombol) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'flex flex-col sm:flex-row gap-2 w-full sm:w-auto';
+    tombol.parentElement.insertBefore(wrap, tombol);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md w-full sm:w-auto flex items-center justify-center gap-2 disabled:opacity-60';
+    btn.innerHTML = '<i class="fa-solid fa-file-excel"></i> Unduh Excel';
+    btn.onclick = () => unduh(jenis, btn);
+    wrap.appendChild(btn); wrap.appendChild(tombol);
+  });
+})();
