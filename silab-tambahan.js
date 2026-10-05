@@ -1,3 +1,116 @@
+/* SiLABFarma - PERCEPATAN. Tempel blok ini di PALING ATAS silab-tambahan.js (sebelum blok "PDF mengikuti format form Word"). */
+(function () {
+  const $ = id => document.getElementById(id);
+
+  // CSS: overlay memudar cepat, tidak menghalangi klik saat transparan, dan SweetAlert selalu di atas overlay
+  const st = document.createElement('style');
+  st.textContent =
+    '#loading-overlay{transition:opacity .15s ease!important}' +
+    '#loading-overlay[style*="opacity: 0;"]{pointer-events:none}' +
+    '.swal2-container{z-index:10050!important}';
+  document.head.appendChild(st);
+
+  // ===== 1. fetchData: layar loading penuh HANYA saat pertama kali buka. Selanjutnya refresh diam-diam. =====
+  let loadedOnce = false, inflight = null, again = false, wantToast = false;
+
+  async function jalankan(showToast) {
+    const loader = $('loading-overlay');
+    if (!loadedOnce) {
+      $('loading-text').innerText = 'Memuat data...';
+      loader.style.display = 'flex'; loader.style.opacity = '1';
+    }
+    let berhasil = true;
+    try {
+      const [inv, logs, alat, loans, ganti] = await Promise.all([
+        gsRun('getInventoryData'), gsRun('getLogData'), gsRun('getAlatData'),
+        gsRun('getLogPeminjamanData'), gsRun('getLogGantiAlatData')
+      ]);
+      INVENTORY_DATA = inv || []; REQUEST_DATA = logs || []; ALAT_DATA = alat || [];
+      LOAN_DATA = loans || []; GANTI_DATA = ganti || [];
+    } catch (err) {
+      berhasil = false;
+      console.warn('Gagal ambil data dari server:', err);
+      if (!loadedOnce) useMockData();   // data lama TIDAK ditimpa saat refresh berikutnya gagal
+      else Swal.fire({ toast: true, position: 'top-end', icon: 'error', title: 'Gagal memperbarui data', showConfirmButton: false, timer: 2500 });
+    }
+    if (berhasil || !loadedOnce) refreshUI(showToast && berhasil);
+    if (!loadedOnce) { loader.style.opacity = '0'; loader.style.display = 'none'; }
+    loadedOnce = true;
+  }
+
+  window.fetchData = function (showToast = false) {
+    if (inflight) { again = true; wantToast = wantToast || showToast; return inflight; }
+    inflight = jalankan(showToast).finally(() => {
+      inflight = null;
+      if (again) { const t = wantToast; again = false; wantToast = false; window.fetchData(t); }
+    });
+    return inflight;
+  };
+
+  // refreshUI versi baru: sama seperti aslinya, tetapi TIDAK menyentuh overlay loading
+  window.refreshUI = function (showToast) {
+    renderTableStok(); renderTableStokAlat(); renderDashboardStats(); renderKatalogMini();
+    renderRiwayat(); renderRiwayatAlat(); renderCart(); renderKatalogAlatMini(); renderCartAlat();
+    renderKatalogGantiMini(); renderCartGanti(); renderRiwayatGanti();
+    updateBadgeGanti(); updateBadgePinjam(); renderTindakLanjutKeterlambatan();
+    if (showToast) Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Data Terupdate', showConfirmButton: false, timer: 1500 });
+  };
+
+  // ===== 2. Render tabel jauh lebih cepat =====
+  // Kode asli memakai  tbody.innerHTML += '<tr>...'  di dalam loop. Tiap putaran browser membongkar & membangun ulang
+  // seluruh isi tabel (makin banyak data makin lambat). Di sini tulisan ditampung dulu, lalu dipasang SEKALI di akhir.
+  const nGet = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML').get;
+  const nSet = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML').set;
+  function tampung(el) {
+    if (el.__flush) return;
+    let buf = null;
+    Object.defineProperty(el, 'innerHTML', {
+      configurable: true,
+      get() { return buf === null ? nGet.call(this) : buf; },
+      set(v) { buf = String(v); }
+    });
+    el.__flush = () => { delete el.innerHTML; delete el.__flush; if (buf !== null) nSet.call(el, buf); };
+  }
+  function batched(nama, ids) {
+    const asli = window[nama];
+    if (typeof asli !== 'function') return;
+    window[nama] = function () {
+      const els = ids.map($).filter(Boolean);
+      els.forEach(tampung);
+      try { return asli.apply(this, arguments); }
+      finally { els.forEach(e => e.__flush && e.__flush()); }
+    };
+  }
+  batched('renderTableStok', ['stok-table-body', 'stok-menipis-table-body', 'stok-kadaluarsa-table-body']);
+  batched('renderTableStokAlat', ['stok-alat-table-body']);
+  batched('renderRiwayat', ['recent-requests-table', 'riwayat-table-body']);
+  batched('renderRiwayatAlat', ['recent-loans-table', 'riwayat-alat-table-body']);
+  batched('renderRiwayatGanti', ['riwayat-ganti-table-body']);
+  batched('renderTindakLanjutKeterlambatan', ['list-terlambat-pinjam', 'list-terlambat-ganti']);
+  batched('renderKatalogMini', ['katalog-mini']);
+  batched('renderKatalogAlatMini', ['katalog-alat-mini']);
+  batched('renderKatalogGantiMini', ['katalog-ganti-mini']);
+  batched('renderCart', ['keranjang-list']);
+  batched('renderCartAlat', ['keranjang-alat-list']);
+  batched('renderCartGanti', ['keranjang-ganti-list']);
+
+  // ===== 3. Update tampilan langsung (tanpa menunggu ambil ulang data) =====
+  window.__silabPatch = {
+    pengembalian(rowIndex, jumlah) {
+      const rec = LOAN_DATA.find(x => x.rowIndex === rowIndex); if (!rec) return;
+      rec.jumlahDikembalikan = (rec.jumlahDikembalikan || 0) + Number(jumlah);
+      const alat = ALAT_DATA.find(a => a.id === rec.idAlat); if (alat) alat.stok += Number(jumlah);
+      renderRiwayatAlat(); updateBadgePinjam(); renderTindakLanjutKeterlambatan(); renderTableStokAlat(); renderKatalogAlatMini();
+    },
+    ganti(rowIndex) {
+      const rec = GANTI_DATA.find(x => x.rowIndex === rowIndex); if (!rec) return;
+      rec.status = 'Sudah Diganti';
+      const alat = ALAT_DATA.find(a => a.id === rec.alatId); if (alat) alat.stok += Number(rec.jumlah);
+      renderRiwayatGanti(); updateBadgeGanti(); renderTindakLanjutKeterlambatan(); renderTableStokAlat(); renderKatalogGantiMini();
+    }
+  };
+})();
+
 /* SiLABFarma - PDF mengikuti format form Word Prodi DIII Farmasi (kop surat, tabel, validasi). */
 (function () {
   const BLN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -7,15 +120,29 @@
     return isNaN(d) ? String(v) : `${String(d.getDate()).padStart(2, '0')} ${BLN[d.getMonth()]} ${d.getFullYear()}`;
   };
   const X = 25.4, W = 167, PLP = 'Freddy Irwansyah';
-  let kopData = null;
-  async function kop() {
-    if (kopData !== null) return kopData;
-    try {
-      const blob = await (await fetch('kop.png')).blob();
-      kopData = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(blob); });
-    } catch (e) { kopData = ''; }
-    return kopData;
+
+  // [CEPAT] Kop dimuat sekali, dikecilkan ke ukuran cetak, lalu disimpan sebagai JPEG.
+  // JPEG disisipkan langsung oleh jsPDF (jauh lebih cepat daripada PNG besar yang harus diproses ulang tiap PDF).
+  let kopP = null;
+  function kop() {
+    if (kopP) return kopP;
+    kopP = (async () => {
+      try {
+        const blob = await (await fetch('kop.png')).blob();
+        const url = URL.createObjectURL(blob);
+        const im = await new Promise((ok, ng) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ng; i.src = url; });
+        const sc = Math.min(1, 1400 / im.naturalWidth);
+        const c = document.createElement('canvas');
+        c.width = Math.round(im.naturalWidth * sc); c.height = Math.round(im.naturalHeight * sc);
+        const g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        return c.toDataURL('image/jpeg', 0.95);
+      } catch (e) { return ''; }
+    })();
+    return kopP;
   }
+  setTimeout(kop, 300);   // siapkan di latar belakang sejak halaman dibuka
 
   async function build(o) {
     const { jsPDF } = window.jspdf, d = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -25,7 +152,7 @@
     d.setTextColor(0); d.setDrawColor(0); d.setLineWidth(0.25);
 
     // Kop surat + judul
-    if (img) { try { d.addImage(img, 'PNG', 9.4, 7.4, 161, 22.6); } catch (e) {} }
+    if (img) { try { d.addImage(img, 'JPEG', 9.4, 7.4, 161, 22.6); } catch (e) {} }
     d.setFont('helvetica', 'bold'); d.setFontSize(11);
     d.text(o.judul, 105, 36, { align: 'center' });
     d.text('UNIT LABORATORIUM TERPADU', 105, 40.8, { align: 'center' });
@@ -143,11 +270,21 @@
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // ================= 1. BUKTI PDF DIKIRIM LEWAT EMAIL (bukan unduh otomatis) =================
+  // ================= 1. BUKTI PDF DIKIRIM LEWAT EMAIL (di latar belakang, layar tidak menunggu) =================
   const JENIS = { submitRequestMulti: 'Permintaan Bahan', submitPeminjamanMulti: 'Peminjaman Alat', submitGantiAlatMulti: 'Laporan Alat Rusak' };
-  let emailTujuan = null, alasan = '';
+  let emailTujuan = null;
+  const fire = Swal.fire.bind(Swal);
 
-  async function kirimEmail(name, args, r) {
+  function unduhPdf(r) {
+    const a = document.createElement('a');
+    a.href = 'data:application/pdf;base64,' + r.pdfBase64;
+    a.download = r.pdfName || 'Bukti_Pengajuan.pdf';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  // [CEPAT] Tidak di-await: pengajuan langsung dinyatakan berhasil (data sudah tersimpan di database),
+  // email dikirim sambil mahasiswa melihat notifikasi. Bila email gagal, PDF diunduh sebagai cadangan.
+  async function kirimEmailBg(name, args, r) {
     const p = args[0] || {};
     try {
       const res = await fetch('/api/kirim-email', {
@@ -159,13 +296,12 @@
         try { d = await res.json(); } catch (_) {}
         throw new Error(d.error || ('HTTP ' + res.status));
       }
-      emailTujuan = p.email;
-      return { status: 'Sukses' };               // tanpa pdfBase64 => PDF tidak diunduh otomatis
+      fire({ toast: true, position: 'top-end', icon: 'success', title: 'Bukti PDF terkirim ke ' + p.email, showConfirmButton: false, timer: 3500 });
     } catch (e) {
-      emailTujuan = null;
-      alasan = e.message;
       console.error('Kirim email gagal:', e);
-      return r;                                  // cadangan: bila email gagal, PDF tetap diunduh
+      unduhPdf(r);
+      fire({ icon: 'warning', title: 'Email gagal terkirim',
+             html: 'Alasan: ' + esc(e.message) + '.<br>PDF diunduh sebagai cadangan, mohon simpan filenya.' });
     }
   }
 
@@ -177,8 +313,18 @@
       if (name === 'withFailureHandler') return f => bungkus(onOk, f);
       return (...args) => {
         if (name === 'submitGantiAlatMulti' && args[0]) args[0].email = $('ganti-email').value.trim();
-        asli.withSuccessHandler(async r => {
-          if (JENIS[name] && r && r.pdfBase64) r = await kirimEmail(name, args, r);
+        asli.withSuccessHandler(r => {
+          try {
+            if (JENIS[name] && r && r.pdfBase64) {
+              emailTujuan = (args[0] || {}).email;
+              kirimEmailBg(name, args, r);
+              r = { status: 'Sukses' };              // tanpa pdfBase64 => PDF tidak diunduh otomatis
+            } else if (name === 'markPengembalianSebagian') {
+              window.__silabPatch.pengembalian(args[0], args[1]);   // tampilan langsung berubah
+            } else if (name === 'markGantiAlatSelesai') {
+              window.__silabPatch.ganti(args[0]);
+            }
+          } catch (e) { console.error(e); }
           onOk && onOk(r);
         }).withFailureHandler(e => onFail && onFail(e))[name](...args);
       };
@@ -187,13 +333,10 @@
   window.google.script.run = bungkus();
 
   // Ganti teks pemberitahuan "otomatis diunduh" menjadi "dikirim ke email"
-  const fire = Swal.fire.bind(Swal);
   Swal.fire = (...a) => {
     const o = a[0];
     if (o && typeof o === 'object') {
-      const info = emailTujuan
-        ? `Bukti PDF sudah dikirim ke ${esc(emailTujuan)}. Jika belum masuk, cek folder Spam.`
-        : `Email gagal terkirim (alasan: ${esc(alasan)}), jadi PDF diunduh sebagai cadangan. Mohon simpan filenya.`;
+      const info = `Bukti PDF sedang dikirim ke ${esc(emailTujuan)}. Jika belum masuk beberapa menit lagi, cek folder Spam.`;
       if (/otomatis diunduh/.test(o.text || '')) o.text = info;
       if (/Batas waktu penggantian/.test(o.html || '')) o.html += `<br><small>${info}</small>`;
     }
