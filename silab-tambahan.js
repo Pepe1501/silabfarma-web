@@ -772,3 +772,33 @@
     wrap.appendChild(btn); wrap.appendChild(tombol);
   });
 })();
+
+/* SiLABFarma - PERBAIKAN: tanda tangan tidak lagi terhapus sendiri di HP.
+   Penyebab: saat keyboard HP muncul (mis. mengetik jumlah bahan) atau bilah alamat browser naik-turun, browser mengirim
+   kejadian "resize". Kode lama menanggapinya dengan membuat ulang kanvas tanda tangan, sehingga gambarnya hilang.
+   Di sini gambar disimpan sebelum kanvas dibuat ulang, lalu dipulihkan setelahnya. */
+(function () {
+  const ids = ['signature-pad', 'signature-pad-alat', 'signature-pad-ganti'];
+  const tunggu = {};
+  const salin = cv => {
+    const s = document.createElement('canvas');
+    s.width = cv.width; s.height = cv.height;
+    s.getContext('2d').drawImage(cv, 0, 0);
+    return s;
+  };
+  // Didaftarkan lebih dulu daripada pendengar milik index.html, jadi berjalan SEBELUM kanvas dibuat ulang.
+  window.addEventListener('resize', () => {
+    ids.forEach(id => {
+      const cv = document.getElementById(id);
+      if (!cv || tunggu[id] || !cv.offsetWidth || isCanvasBlank(cv)) return;
+      tunggu[id] = salin(cv);
+    });
+    setTimeout(() => ids.forEach(id => {
+      const s = tunggu[id]; if (!s) return;
+      tunggu[id] = null;
+      const cv = document.getElementById(id);
+      if (!cv || !cv.offsetWidth) return;
+      cv.getContext('2d').drawImage(s, 0, 0, cv.offsetWidth, cv.offsetHeight);
+    }), 0);
+  });
+})();
