@@ -802,3 +802,205 @@
     }), 0);
   });
 })();
+/* SiLABFarma - Penggunaan Laboratorium (pilihan lab di form peminjaman + rekap di menu admin). */
+(function () {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const TABEL = 'log_penggunaan_lab';
+  const LABS = ['Laboratorium Kimia', 'Laboratorium Teknologi Solid', 'Laboratorium Farmakologi',
+                'Laboratorium Farmasetika', 'Laboratorium Mikrobiologi', 'Laboratorium Farmakognosi'];
+  const INP = 'w-full bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 transition';
+  const LBL = 'block text-xs font-bold text-slate-600 uppercase mb-1';
+
+  // ---------- helper waktu ----------
+  const det = t => { const [h, m, s] = String(t || '0:0:0').split(':').map(Number); return h * 3600 + m * 60 + (s || 0); };
+  const durasi = (a, b) => {
+    const d = Math.max(0, det(b) - det(a));
+    return [Math.floor(d / 3600), Math.floor(d % 3600 / 60), d % 60].map(n => String(n).padStart(2, '0')).join(':');
+  };
+  const tgl = iso => String(iso || '').split('-').reverse().join('/');
+  const jam = t => String(t || '').slice(0, 8);
+
+  // ================= 1. FORM PEMINJAMAN: pilihan laboratorium + jam =================
+  $('pinjam-tujuan').parentElement.insertAdjacentHTML('beforebegin',
+    `<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-teal-50/60 border border-teal-100 rounded-xl p-4">
+       <div class="sm:col-span-2">
+         <label class="${LBL}">Laboratorium yang Digunakan Praktikum</label>
+         <select id="pinjam-lab" class="${INP}">
+           <option value="">-- Pilih laboratorium --</option>
+           ${LABS.map(l => `<option value="${l}">${l}</option>`).join('')}
+         </select>
+       </div>
+       <div>
+         <label class="${LBL}">Jam Mulai</label>
+         <input type="time" id="pinjam-jam-mulai" required class="${INP}">
+       </div>
+       <div>
+         <label class="${LBL}">Jam Selesai</label>
+         <input type="time" id="pinjam-jam-selesai" required class="${INP}">
+       </div>
+       <p class="sm:col-span-2 text-xs text-teal-800">Jumlah jam penggunaan: <b id="pinjam-durasi">-</b></p>
+     </div>`);
+
+  const hitungDurasi = () => {
+    const a = $('pinjam-jam-mulai').value, b = $('pinjam-jam-selesai').value;
+    $('pinjam-durasi').textContent = a && b && b > a ? durasi(a + ':00', b + ':00') : '-';
+  };
+  $('pinjam-jam-mulai').addEventListener('input', hitungDurasi);
+  $('pinjam-jam-selesai').addEventListener('input', hitungDurasi);
+  $('loan-form').addEventListener('reset', () => setTimeout(hitungDurasi, 0));
+
+  // Validasi sebelum pindah ke langkah 2 (dipasang di fase capture agar berjalan lebih dulu)
+  const tombolLanjut = document.querySelector('#loan-form > button[type=button]');
+  if (tombolLanjut) tombolLanjut.addEventListener('click', e => {
+    const a = $('pinjam-jam-mulai').value, b = $('pinjam-jam-selesai').value;
+    let pesan = '';
+    if (!$('pinjam-lab').value) pesan = 'Silakan pilih laboratorium yang akan digunakan.';
+    else if (a && b && b <= a) pesan = 'Jam selesai harus lebih besar dari jam mulai.';
+    if (pesan) { e.stopImmediatePropagation(); Swal.fire('Data Belum Lengkap', pesan, 'warning'); }
+  }, true);
+
+  // ================= 2. SIMPAN CATATAN LAB SETELAH PEMINJAMAN BERHASIL =================
+  async function simpanLab(row) {
+    const { error } = await db.from(TABEL).insert(row);
+    if (error) {
+      console.error('Gagal mencatat penggunaan lab:', error);
+      Swal.fire({ toast: true, position: 'top-end', icon: 'warning', title: 'Peminjaman tersimpan, tetapi catatan lab gagal', showConfirmButton: false, timer: 3500 });
+    }
+  }
+  const prev = window.google.script.run;
+  function bungkus(onOk, onFail) {
+    return new Proxy({}, { get: (_, name) => {
+      if (typeof name !== 'string') return undefined;
+      if (name === 'withSuccessHandler') return f => bungkus(f, onFail);
+      if (name === 'withFailureHandler') return f => bungkus(onOk, f);
+      return (...args) => {
+        let snap = null;
+        if (name === 'submitPeminjamanMulti' && args[0]) {
+          const p = args[0];
+          snap = { tanggal_penggunaan: p.tanggalPinjam, nama: p.peminjam, nim: p.nim, tingkat: p.kelas,
+                   nama_praktikum: p.tujuan, nama_dosen: p.dosen, laboratorium: $('pinjam-lab').value,
+                   jam_mulai: $('pinjam-jam-mulai').value, jam_selesai: $('pinjam-jam-selesai').value };
+        }
+        prev.withSuccessHandler(r => { if (snap) simpanLab(snap); onOk && onOk(r); })
+            .withFailureHandler(e => onFail && onFail(e))[name](...args);
+      };
+    } });
+  }
+  window.google.script.run = bungkus();
+
+  // ================= 3. MENU ADMIN: PENGGUNAAN LABORATORIUM =================
+  const navClass = document.getElementById('btn-riwayat-ganti').className;
+  document.getElementById('btn-riwayat-ganti').insertAdjacentHTML('afterend',
+    `<button onclick="attemptSwitchTab('penggunaan-lab')" id="btn-penggunaan-lab" class="${navClass}">
+       <div class="flex items-center gap-3"><i class="fa-solid fa-microscope text-base w-5 text-teal-400"></i><span>Penggunaan Lab</span></div>
+     </button>`);
+  tabTitles['penggunaan-lab'] = 'Penggunaan Laboratorium';
+
+  $('tab-riwayat-ganti').insertAdjacentHTML('afterend',
+    `<section id="tab-penggunaan-lab" class="tab-content space-y-6">
+       <div class="bg-teal-50 border border-teal-200 rounded-2xl p-6 shadow-sm">
+         <h3 class="font-bold text-teal-900 text-lg"><i class="fa-solid fa-microscope mr-2"></i>Rekap Penggunaan Laboratorium</h3>
+         <p class="text-sm text-teal-800 mt-1">Tercatat otomatis dari Form Peminjaman Alat Praktikum.</p>
+       </div>
+       <div id="lab-ringkasan" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3"></div>
+       <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col lg:flex-row gap-3 lg:items-end">
+         <div><label class="${LBL}">Bulan</label><input type="month" id="lab-f-bulan" class="${INP}"></div>
+         <div><label class="${LBL}">Laboratorium</label>
+           <select id="lab-f-lab" class="${INP}"><option value="">Semua laboratorium</option>${LABS.map(l => `<option>${l}</option>`).join('')}</select></div>
+         <div class="flex-1"><label class="${LBL}">Cari</label><input type="text" id="lab-f-cari" placeholder="Nama, dosen, atau kegiatan..." class="${INP}"></div>
+         <button type="button" id="lab-btn-muat" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold"><i class="fa-solid fa-rotate-right mr-1"></i>Segarkan</button>
+         <button type="button" id="lab-btn-csv" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold"><i class="fa-solid fa-file-excel mr-1"></i>Unduh CSV</button>
+       </div>
+       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"><div class="overflow-x-auto">
+         <table class="w-full text-left border-collapse">
+           <thead><tr class="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase tracking-wider">
+             <th class="p-4">No</th><th class="p-4">Tanggal Penggunaan</th><th class="p-4">Nama</th><th class="p-4">Tingkat</th>
+             <th class="p-4">Praktikum/Kegiatan</th><th class="p-4">Nama Dosen</th><th class="p-4">Jam Mulai</th>
+             <th class="p-4">Jam Selesai</th><th class="p-4">Jumlah Jam</th><th class="p-4">Laboratorium</th><th class="p-4">Aksi</th>
+           </tr></thead>
+           <tbody id="lab-tbody" class="text-sm divide-y divide-slate-100"></tbody>
+         </table></div></div>
+     </section>`);
+
+  let DATA = [];
+  const tersaring = () => {
+    const b = $('lab-f-bulan').value, l = $('lab-f-lab').value, q = $('lab-f-cari').value.trim().toLowerCase();
+    return DATA.filter(r => (!b || String(r.tanggal_penggunaan).startsWith(b)) && (!l || r.laboratorium === l) &&
+      (!q || [r.nama, r.nama_dosen, r.nama_praktikum, r.nim].join(' ').toLowerCase().includes(q)));
+  };
+
+  function render() {
+    const rows = tersaring();
+    $('lab-ringkasan').innerHTML = LABS.map(l => {
+      const x = rows.filter(r => r.laboratorium === l);
+      const jamTotal = x.reduce((s, r) => s + Math.max(0, det(r.jam_selesai) - det(r.jam_mulai)), 0) / 3600;
+      return `<div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+        <p class="text-[10px] font-extrabold text-slate-400 uppercase leading-tight">${esc(l)}</p>
+        <p class="text-2xl font-black text-teal-700 mt-1">${x.length}<span class="text-xs font-semibold text-slate-400"> sesi</span></p>
+        <p class="text-[11px] text-slate-500">${jamTotal.toFixed(1)} jam</p></div>`;
+    }).join('');
+    $('lab-tbody').innerHTML = rows.length ? rows.map((r, i) => `
+      <tr class="hover:bg-slate-50 transition">
+        <td class="p-4 text-xs text-slate-500">${i + 1}</td>
+        <td class="p-4 text-xs text-slate-600">${tgl(r.tanggal_penggunaan)}</td>
+        <td class="p-4 font-semibold text-slate-700">${esc(r.nama)}<br><span class="text-[11px] text-slate-400 font-normal">${esc(r.nim)}</span></td>
+        <td class="p-4 text-xs text-slate-600">${esc(r.tingkat)}</td>
+        <td class="p-4 text-xs text-slate-600 max-w-[220px]">${esc(r.nama_praktikum)}</td>
+        <td class="p-4 text-xs text-slate-600">${esc(r.nama_dosen)}</td>
+        <td class="p-4 text-xs text-slate-600">${jam(r.jam_mulai)}</td>
+        <td class="p-4 text-xs text-slate-600">${jam(r.jam_selesai)}</td>
+        <td class="p-4 text-xs font-bold text-teal-700">${durasi(r.jam_mulai, r.jam_selesai)}</td>
+        <td class="p-4"><span class="bg-teal-100 text-teal-700 px-2 py-1 rounded-md text-[10px] font-bold">${esc(r.laboratorium)}</span></td>
+        <td class="p-4"><button type="button" data-hapus="${r.id}" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-[10px] font-bold"><i class="fa-solid fa-trash-can mr-1"></i>Hapus</button></td>
+      </tr>`).join('')
+      : '<tr><td colspan="11" class="p-4 text-center text-slate-500 text-xs">Belum ada data penggunaan laboratorium.</td></tr>';
+  }
+
+  async function muat() {
+    $('lab-tbody').innerHTML = '<tr><td colspan="11" class="p-4 text-center text-slate-400 text-xs">Memuat data...</td></tr>';
+    const { data, error } = await db.from(TABEL).select('*')
+      .order('tanggal_penggunaan', { ascending: false }).order('jam_mulai', { ascending: false });
+    if (error) {
+      $('lab-tbody').innerHTML = `<tr><td colspan="11" class="p-4 text-center text-rose-500 text-xs">Gagal memuat: ${esc(error.message)}</td></tr>`;
+      return;
+    }
+    DATA = data || []; render();
+  }
+
+  $('lab-btn-muat').onclick = muat;
+  ['lab-f-bulan', 'lab-f-lab', 'lab-f-cari'].forEach(id => $(id).addEventListener('input', render));
+
+  $('lab-tbody').addEventListener('click', async e => {
+    const b = e.target.closest('button[data-hapus]'); if (!b) return;
+    const r = await Swal.fire({ title: 'Hapus catatan ini?', text: 'Catatan penggunaan lab akan dihapus permanen.', icon: 'warning',
+      showCancelButton: true, confirmButtonColor: '#e11d48', cancelButtonColor: '#94a3b8', confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' });
+    if (!r.isConfirmed) return;
+    const { data, error } = await db.from(TABEL).delete().eq('id', b.dataset.hapus).select();
+    if (error || !data || !data.length) { Swal.fire('Gagal Menghapus', error ? error.message : 'Izin database belum diatur.', 'error'); return; }
+    muat();
+  });
+
+  $('lab-btn-csv').onclick = () => {
+    const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+    const head = ['No', 'Tanggal Penggunaan', 'Nama', 'NIM', 'Tingkat', 'Nama Praktikum/Kegiatan', 'Nama Dosen', 'Jam Mulai', 'Jam Selesai', 'Jumlah Jam Penggunaan', 'Laboratorium'];
+    const baris = tersaring().map((r, i) => [i + 1, tgl(r.tanggal_penggunaan), r.nama, r.nim, r.tingkat, r.nama_praktikum, r.nama_dosen,
+      jam(r.jam_mulai), jam(r.jam_selesai), durasi(r.jam_mulai, r.jam_selesai), r.laboratorium]);
+    const csv = '\ufeff' + [head, ...baris].map(r => r.map(q).join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = 'Penggunaan_Laboratorium_' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  // Tab ini khusus admin; data dimuat setiap kali dibuka
+  const asliTab = window.attemptSwitchTab;
+  window.attemptSwitchTab = function (id) {
+    if (id === 'penggunaan-lab') {
+      if (!isAdmin) { $('login-modal').classList.add('active'); return; }
+      asliTab(id); muat(); return;
+    }
+    asliTab(id);
+  };
+})();
